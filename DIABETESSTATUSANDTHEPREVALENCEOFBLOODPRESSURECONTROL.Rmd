@@ -1,0 +1,264 @@
+---
+title: " DIABETES STATUS AND THE PREVALENCE OF BLOOD PRESSURE CONTROL"
+author: "Kwame Nkrumah and Eileen Chenhui	Qiu"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r message=FALSE, warning=FALSE}
+## Libraries
+library(causaldata)
+library(ggdag)
+library(visdat)
+library(tidyverse)
+library(dplyr)
+library(smd)
+library(gtsummary)
+library(survey)
+library(tableone)
+library(halfmoon)
+library(broom)
+#devtools::install_github("r-causal/propensity")
+library(propensity)
+library(labelled)
+library(causaldata)
+library(webshot2)
+library(sandwich)
+library(tipr)
+library(rsample)
+suppressMessages(library(ggplot2))
+suppressMessages(library(gridExtra))
+suppressMessages(library(MASS))
+```
+```{r}
+load(file = "C:\\Users\\nkwam\\Documents\\WFU Fall 2023\\CAUSAL\\nhanes_data.rda")
+
+
+```
+```{r message=FALSE, warning=FALSE, include=FALSE}
+new_nhanes_data<-nhanes_data[nhanes_data$svy_subpop_htn == 1, ]
+head(new_nhanes_data)
+```
+
+
+##DAG
+
+```{r}
+bp_dag <- dagify(
+  bp_control_140_90 ~ htn_jnc7+demo_age_cat+demo_gender+bp_med_n_pills+cc_smoke+bp_med_beta+cc_bmi+cc_diabetes+bp_med_ace,
+  cc_diabetes~ htn_jnc7+demo_age_cat+demo_gender+bp_med_n_pills+cc_smoke+bp_med_beta+cc_bmi+bp_med_ace,
+  htn_jnc7~demo_age_cat+demo_gender+bp_med_n_pills+bp_med_beta+cc_bmi+bp_med_ace,
+  smoke~demo_age_cat+demo_gender+bp_med_n_pills+bp_med_beta+cc_bmi+bp_med_ace,
+ 
+  exposure = "cc_diabetes",
+  outcome = "bp_control_140_90",
+  labels = c(
+    cc_diabetes = "Diabetes Status",
+    bp_control_140_90 = "Blood pressure control",
+    htn_jnc7 = "Hypertension Status",
+    demo_age_cat= "Age Category",
+    demo_gender = "Gender Category",
+    bp_med_n_pills = "Number of antihypertensive medication pills",
+    cc_smoke = "Smoking Status",
+    cc_bmi = " Body mass index(kg/m2)",
+    bp_med_ace = "ACE Inhibitors",
+    bp_med_beta="Beta blockers"
+  )
+)
+ggdag(bp_dag, use_labels = "label", text = FALSE) +
+  theme_dag()
+
+```
+
+```{r}
+ggdag_adjustment_set(bp_dag, use_labels = "label", text = FALSE)
+dagitty::adjustmentSets(bp_dag)
+
+```
+
+
+##MISSING DATA
+
+
+
+```{r }
+
+vis_miss(nhanes_data[, c("bp_control_140_90","htn_jnc7","demo_age_cat","demo_gender","bp_med_n_pills","cc_smoke","bp_med_beta","cc_bmi","cc_diabetes","bp_med_ace")])
+dim(nhanes_data)
+```
+```{r message=FALSE, warning=FALSE, include=FALSE}
+my_nhanes_data <- nhanes_data[, c("bp_control_140_90","htn_jnc7","demo_age_cat","demo_gender","bp_med_n_pills","cc_smoke","bp_med_beta","cc_bmi","cc_diabetes","bp_med_ace")] |>
+  drop_na()
+
+
+new_my_nhanes_data <- data.frame(
+  bp_control_140_90 = my_nhanes_data$bp_control_140_90
+)
+```
+
+
+
+
+## 3.PROPENSITY SCORE MODEL
+
+
+
+```{r,warning = FALSE}
+my_nhanes_data <- glm(cc_diabetes~ htn_jnc7+demo_age_cat+demo_gender+bp_med_n_pills+cc_smoke+bp_med_beta+cc_bmi+bp_med_ace, data = my_nhanes_data, family = binomial) |>
+  augment(type.predict = "response", data = my_nhanes_data)
+```
+
+
+
+```{r, message = FALSE, warning = FALSE,fig.asp=1}
+my_nhanes_data <- my_nhanes_data |>
+  mutate(w_att = wt_att(.fitted,cc_diabetes))
+
+g1<-ggplot(my_nhanes_data, aes(x = .fitted,
+  group = factor(cc_diabetes),
+  fill = factor(cc_diabetes))) +
+  geom_mirror_histogram(bins = 30) +
+  labs(fill = "Diabetes Status",
+       x = "Propensity Scores") +
+  ggtitle("Figure 2: Unweighted Propensity Distribution for Exposure Groups")
+g2<-ggplot(my_nhanes_data, aes(x = .fitted, weights = w_att,
+  group = factor(cc_diabetes),
+  fill = factor(cc_diabetes))) +
+  geom_mirror_histogram(bins = 30) +
+  labs(fill = "Diabetes Status",
+       x = "Propensity Scores (ATT weight)") +
+  ggtitle("Figure 3: Weighted Propensity Distribution for Exposure Groups")
+grid.arrange(g1,g2, ncol = 1)
+```
+
+##MODEL DIAGNOSTIC
+
+```{r,warning=FALSE}
+my_nhanes_data_att <- svydesign(
+  ids = ~1,
+  data =my_nhanes_data,
+  weights = ~w_att
+)
+
+ tbl_svysummary(
+  my_nhanes_data_att,
+  by = cc_diabetes,
+  include = c(htn_jnc7,demo_age_cat,demo_gender,bp_med_n_pills,cc_smoke,bp_med_beta,cc_bmi,bp_med_ace)
+) |>
+  add_overall(last = TRUE)
+
+
+```
+
+##love plot
+
+```{r}
+smds <- tidy_smd(
+  my_nhanes_data,
+  .vars = c(htn_jnc7,demo_age_cat,demo_gender,bp_med_n_pills,cc_smoke,bp_med_beta,cc_bmi,bp_med_ace),
+  .group = cc_diabetes,
+  .wts = w_att # weight is optional
+)
+
+ smds <- smds %>% mutate(Variable = case_when(
+    variable == "htn_jnc7" ~ "Hypertension Status",
+    variable == "demo_age_cat" ~ "Age Category",
+    variable == "demo_gender" ~ "Gender Category",
+    variable == "bp_med_n_pills" ~ "Number of anti-hypertensive medication pills",
+    variable == "cc_smoke" ~ "Smoking Status",
+    variable == "bp_med_beta" ~ "Beta blockers",
+    variable == "cc_bmi" ~ "Body mass index",
+    variable == "bp_med_ace" ~ "ACE Inhibitors",
+    # Add more conditions as needed
+    
+    TRUE ~ as.character(variable)  # Keep the original name if no match
+  ))
+ggplot(
+  data = smds ,
+  aes(
+    x = abs(smd),
+    y = Variable,
+    group = method,
+    color = method
+  )
+) +  
+  geom_love()  +
+  labs(x = "Absolute Value of Standardized Mean Differences")
+
+```
+
+##G-COMPUTATION MODEL 
+
+```{r echo=FALSE, warning=FALSE}
+suppressMessages({
+  
+  fit_gcomp <- function(split, ...) { 
+  .df <- analysis(split) 
+  my_nhanes_data <- glm(cc_diabetes~ htn_jnc7+demo_age_cat+demo_gender+bp_med_n_pills+cc_smoke+bp_med_beta+cc_bmi+bp_med_ace, data = .df, family = binomial) |>
+  augment(type.predict = "response", data = .df)
+  
+  my_nhanes_data <- my_nhanes_data |>
+  mutate(w_att = wt_att(.fitted,cc_diabetes))
+  
+  # fit outcome model. remember to model using `.df` instead of `seven_dwarfs`
+  model <- glm(bp_control_140_90 ~cc_diabetes+ htn_jnc7+demo_age_cat+demo_gender+bp_med_n_pills+cc_smoke+bp_med_beta+cc_bmi+bp_med_ace, data = my_nhanes_data , family = binomial,weights=w_att)
+#  set all participants to have a = 0
+untreated_data <- my_nhanes_data  |>
+  mutate(cc_diabetes="No") 
+
+#  set all participants to have a = 1
+treated_data <-my_nhanes_data  |>
+  mutate(cc_diabetes= "Yes") 
+
+ #  predict under the data where everyone is untreated
+predicted_untreated <- model |>
+  augment(newdata = untreated_data,type.predict = "response") |>
+  select(untreated = .fitted)
+
+#  predict under the data where everyone is treated
+predicted_treated <- model |>
+  augment(newdata = treated_data,type.predict = "response") |>
+  select(treated = .fitted)
+
+predictions <- bind_cols(
+  predicted_untreated, 
+  predicted_treated
+) 
+
+  
+  # predict actual wait time for each cloned dataset
+  
+  
+  # calculate ATE
+ predictions |>
+  summarise(
+    mean_treated = mean(treated),
+    mean_untreated = mean(untreated),
+    difference = mean_treated - mean_untreated
+  ) |>
+    # rsample expects a `term` and `estimate` column
+    pivot_longer(everything(), names_to = "term", values_to = "estimate")
+}
+
+gcomp_results <- bootstraps(my_nhanes_data, 1000
+                            , apparent = TRUE) |>
+  mutate(results = map(splits, fit_gcomp))
+
+
+# using bias-corrected confidence intervals
+boot_estimate <- int_pctl(gcomp_results, results)
+
+boot_estimate
+
+  
+  
+  
+})
+
+
+
+```
