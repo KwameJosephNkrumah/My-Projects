@@ -1,0 +1,111 @@
+---
+title: "SURVIVAL ANALYSIS PROJECT"
+author: "KWAME NKRUMAH"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r,results='hide', warning=FALSE}
+##LOAD PACKAGES
+
+suppressMessages(library(kableExtra))
+
+suppressMessages(library(ggplot2))
+suppressMessages(library(latex2exp))
+suppressMessages(library(dplyr))
+suppressMessages(library(KMsurv))
+suppressMessages(library(survival))
+suppressMessages(library(ggsurvfit))
+suppressMessages(library(survminer))
+suppressMessages(library(gridExtra))
+suppressMessages(library(tableone))
+suppressMessages(library(gtsummary))
+```
+
+```{r,results='hide'}
+## Data 
+data("channing")
+## Dimension of Data
+dim(channing)
+## First few observations
+head(channing)
+?channing
+
+```
+
+
+
+
+
+```{r,results='hide'}
+#RStudio.Version()
+```
+
+
+
+
+
+```{r}
+## demographic information of our data set
+CreateTableOne(data = channing)
+
+```
+
+
+
+```{r}
+## Summarize gender by death status
+with(channing, table(gender,death))
+```
+
+
+```{r}
+
+## Plot of Time from Entering Retirement Home  to Death (in Months)
+channing |> 
+  ggplot(aes(x = time)) + 
+  geom_histogram() + 
+  xlab("Time from Entering Retirement Home  to Death (in Months)") +
+  theme_bw()
+```
+
+
+```{r}
+# distinct ordered unique event time
+channing_surv=with(channing,Surv(time = time,event = death))
+# fit Kaplan Meier survival
+channing_fit=survfit(formula =(channing_surv~1 ),conf.type="plain")
+plot(channing_fit,ylab = "S(x)",xlab = "time difference from entry to death (in month)"
+     ,main=" Overall survival time to death of Elderly Residents ")
+
+
+
+
+```
+
+ 
+  
+```{r}
+# summary of our cox regression model
+coxph(Surv(time, death) ~ gender, data = channing) %>% 
+  
+ tbl_regression(exp = TRUE) 
+
+```
+  
+
+  
+```{r}
+# Fit a Cox proportional hazards model
+
+channing_model <- coxph(Surv(time, death) ~ ageentry, data = channing)
+Continuous_Covariate<-summary(channing_model)$coefficients
+Continuous_Covariate%>%
+  kbl(caption="Summary of our Cox Regression Model with Age of Entry")%>%
+  kableExtra::kable_styling(latex_option="hold_position")
+```
+ 
