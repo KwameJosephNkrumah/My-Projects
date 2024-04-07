@@ -1,0 +1,258 @@
+---
+title: "ANNOTATED CODE"
+author: "KWAME NKRUMAH"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## SECTION 1: INTRODUCTION
+## SECTION 2: DATA CLEANING
+
+
+
+```{r ,warning=FALSE}
+#Importing Data
+suppressMessages(library(readr))
+
+VRBO <- read_csv("VRBO.csv",show_col_types = FALSE)
+ 
+
+
+#CHECKING DIMENSION OF VRBO
+#dim(VRBO)
+
+# CLEANING DATA
+newVRBO<-na.omit(VRBO)
+
+#CHECKING DIMENSION OF newVRBO
+#nrow(newVRBO)
+
+
+
+# removing features
+
+newVRBO<-newVRBO[,-c(1,9)]
+#head(newVRBO)
+#dim(newVRBO)
+lm1=lm(price~.,data=newVRBO)
+#round(summary(lm1)$coeff,2)
+
+
+```
+
+
+## SECTION 3: RIDGE REGRESSION
+
+
+
+```{r}
+# The plot in ggplot2 Dr. Dalzell built
+ridgePlot <- function(ridge.mod, metric, title){
+  library(ggplot2)
+  
+  smallestLambda <- ridge.mod$lambda[which.min(ridge.mod$cvm)] 
+  
+  if(metric == "MSE"){
+  g1 <- ggplot( data.frame(ridge.mod$lambda), aes( x = ridge.mod$lambda, y = (ridge.mod$cvm))) + geom_point() + geom_vline( xintercept = smallestLambda, col = "blue" , lty = 2 ) +  labs(caption = paste("Test MSE values for Different Tuning Parameters. Smallest MSE at lambda = ", smallestLambda), title = title, y = "Test MSE", x = "Tuning Parameter")
+  
+  }
+  
+  if(metric == "RMSE"){
+  g1 <- ggplot( data.frame(ridge.mod$lambda), aes( x = ridge.mod$lambda, y = sqrt(ridge.mod$cvm))) + geom_point() + geom_vline( xintercept = smallestLambda, col = "blue" , lty = 2 ) +  labs(caption = paste("Test RMSE values for Different Tuning Parameters. Smallest RMSE at lambda = ", smallestLambda), title = title, y = "Test RMSE", x = "Tuning Parameter")
+
+  }
+  
+  g1
+}
+```
+
+```{r,fig.asp=0.7}
+# Create the design matrix
+XD <- model.matrix(price ~ . , data = newVRBO)
+#head(XD)
+# Run Ridge Regression
+suppressMessages(library(glmnet))
+# Run 10-fold CV
+set.seed(1)
+ridge <- cv.glmnet(XD, newVRBO$price, alpha = 0,lambda = seq(from = 0, to = 50, by = .5))
+
+# Plot the results
+#plot(ridge,main="Figure 1")
+
+ridgePlot(ridge, metric = "MSE", title = "Figure 3.1:") + theme(text = element_text(size = 10))
+```
+
+
+
+```{r}
+# Create the design matrix
+
+# Choosing the lambda we want
+best_fit <- ridge$glmnet.fit
+#best_fit$lambda
+# Create a comparison matrix
+RidgeResults <- data.frame("Lambda" = ridge$lambda, "MSE" = ridge$cvm)
+
+
+smallestRidge <- which.min(RidgeResults$MSE)
+
+
+# Train LSLR
+lslr.final <- glmnet(XD[,-1], newVRBO$price, alpha =0 ,lambda = 0)
+# Train Ridge
+ridge.final <- glmnet(XD[,-1], newVRBO$price, alpha =0 ,lambda = 9.5)
+# Store the coefficients
+lslr.betas <- as.numeric(coefficients(lslr.final))
+ridge.betas <- as.numeric(coefficients(ridge.final))
+
+# Create a data frame
+Betas <- data.frame("LSLR" = lslr.betas, "Ridge" = ridge.betas)
+
+rownames(Betas) <- colnames(XD)
+
+knitr::kable(Betas, caption = "Table 3.1")
+
+
+
+
+
+
+```
+
+
+ 
+## SECTION 4: LASSO REGRESSION
+
+
+```{r, fig.asp=0.7}
+
+# Run Lasso Regression
+
+# Run 10-fold CV
+set.seed(1)
+lasso<- cv.glmnet(XD, newVRBO$price, alpha = 1,lambda = seq(from = 0, to = 50, by = .5))
+
+# Plot the results
+#plot(lasso,main="Figure 1")
+#Plotting using ggplot2
+ridgePlot(lasso, metric = "MSE", title = "Figure 4.1: ") + theme(text = element_text(size = 10))
+```
+
+
+```{r}
+
+# Choosing the lambda we want
+bestFit <- lasso$glmnet.fit
+#bestFit$lambda
+# Create a comparison matrix
+LassoResults <- data.frame("Lambda" = lasso$lambda, "MSE" = lasso$cvm)
+#LassoResults
+#suppressMessages(library(xtable))
+
+#xtable(LassoResults)
+
+smallest <- which.min(LassoResults$MSE)
+#LassoResults[smallest,]
+
+# Train Rdige
+lasso.final <- glmnet(XD[,-1], newVRBO$price, alpha =1 ,lambda = 0.5)
+# Store the coefficients
+
+lasso.betas <- as.numeric(coefficients(lasso.final))
+
+
+
+
+# Create a data frame
+Betas_1 <- data.frame("LSLR" = lslr.betas, "Lasso" = lasso.betas)
+
+rownames(Betas_1) <- colnames(XD)
+
+knitr::kable(Betas_1,caption = "Table 4.1:")
+
+```
+
+
+
+
+
+## SECTION 5: ELASTIC NET
+
+
+```{r}
+# Choose a sequence of values for alpha 
+alphaseq <- seq(from = 0, to =1 , by =.01)
+
+storage <- data.frame("Alpha" = rep(NA,length(alphaseq)), "Lambda" = rep(NA,length(alphaseq)), "MSE" = rep(NA,length(alphaseq)))
+# Run 10-fold CV
+set.seed(100)
+for( i in 1:101 ){
+  # Pull alpha
+  alpha <- alphaseq[i]
+  
+  # Run 10-fold CV
+  elastic <- cv.glmnet(XD[ , -1], newVRBO$price, alpha = alpha,lambda = seq(from = 0, to = 20, by = .5))
+  
+  # Store lambda 
+  storage$Lambda[i] <- elastic$lambda.min
+  # Store test MSE
+  storage$MSE[i] <- (min(elastic$cvm))
+  # Store Alpha
+  storage$Alpha[i] <- alpha
+}
+# Formatting the output in a pretty way 
+
+# For knitting 
+knitr::kable(storage,caption = "Table 5.1:")
+
+
+#storage[which.min(storage$MSE),]
+
+```
+
+
+
+```{r}
+
+# Obtaining coefficients
+
+# Train Elastic Net
+elastic.final <- glmnet(XD[,-1], newVRBO$price, alpha =0.01 ,
+                      lambda = 5.5)
+
+# Store the coefficients
+elastic.betas <- as.numeric(coefficients(elastic.final))
+
+# Create a data frame
+Beta_2<- data.frame("LSLR" = lslr.betas,"Elastic" = elastic.betas)
+
+rownames(Beta_2) <- colnames(XD)
+
+knitr::kable(Beta_2,caption="Table 5:2")
+
+
+```
+
+
+
+ 
+# SECTION 6 : COMPARISON AND CONCLUSIONS
+
+
+```{r}
+Beta_3<- data.frame("Ridge" = ridge.betas,"Lasso" = lasso.betas,"Elastic" = elastic.betas)
+
+rownames(Beta_3) <- colnames(XD)
+
+knitr::kable(Beta_3, caption = "Table 6.1:")
+
+
+
+
+```
+
+
+
