@@ -1,0 +1,198 @@
+---
+title: "BAYES PROJECT"
+author: "KWAME NKRUMAH"
+output: html_document
+---
+
+```{r setup, include=FALSE,warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r,warning=FALSE}
+suppressMessages(library(readr))
+suppressMessages(library(tidyverse))
+suppressMessages(library(ggplot2))
+suppressMessages(library(latex2exp))
+suppressMessages(library(rstanarm))
+suppressMessages(library(bayesplot))
+suppressMessages(library(class))
+suppressMessages(library(broom.mixed))
+suppressMessages(library(gridExtra))
+suppressMessages(library(kableExtra))
+```
+
+
+```{r,warning=FALSE,results = "hide"}
+
+HouseDataset <- read_csv("C:/Users/nkwam/Documents/WFU SPRING 2023/BAYESIAN STATISTICS/archive.zip",show_col_types = FALSE)
+head(HouseDataset)
+
+dim(HouseDataset)
+sum(is.na(HouseDataset$`Avg. Area Income`))
+sum(is.na(HouseDataset$`House Age`))
+sum(is.na(HouseDataset$`Number of Rooms`))
+sum(is.na(HouseDataset$`Number of Bedrooms`))
+sum(is.na(HouseDataset$`Area Population`))
+sum(is.na(HouseDataset$Price))
+sum(is.na(HouseDataset$Address))
+
+```
+
+## Section 1: Introduction and Data
+
+```{r}
+d1<-ggplot(HouseDataset, aes(x=`Avg. Area Income`, y = Price)) + geom_point(col = 'purple')+ labs(title="Figure 1.1:", x = "The average income of the area  where the house is located", y = "Price of Houses")+ stat_smooth(method = "lm", formula = y ~ x, linewidth = 1, se = FALSE)
+
+d2<-ggplot(HouseDataset, aes(x=`House Age`, y = Price)) + geom_point(col = 'red')+ labs(title="Figure 1.2:", x = "Age of the house in years", y = "Price of Houses")+ stat_smooth(method = "lm", formula = y ~ x, linewidth = 1, se = FALSE)
+
+d3<-ggplot(HouseDataset, aes(x=`Number of Rooms`, y = Price)) + geom_point(col = 'yellow')+ labs(title="Figure 1.3:", x = "Number of Rooms in a house", y = "Price of Houses")+ stat_smooth(method = "lm", formula = y ~ x, linewidth = 1, se = FALSE)
+
+d4<-ggplot(HouseDataset, aes(x=`Area Population`, y = Price)) + geom_point(col = 'green')+ labs(title="Figure 1.4:", x = "Population of the area where the house is located", y = "Price of Houses")+ stat_smooth(method = "lm", formula = y ~ x, linewidth = 1, se = FALSE)
+grid.arrange(d1,d2,d3,d4,ncol=2)
+```
+
+
+
+```{r}
+#Centering our XS
+
+AvgAreaIncomeC<-((HouseDataset$`Avg. Area Income`)-mean(HouseDataset$`Avg. Area Income`))
+HouseDataset$AvgAreaIncomeC<-AvgAreaIncomeC
+HouseAgeC<-(HouseDataset$`House Age`-mean(HouseDataset$`House Age`))
+HouseDataset$HouseAgeC<-HouseAgeC
+NumberOfRoomsC<-(HouseDataset$`Number of Rooms`-mean(HouseDataset$`Number of Rooms`))
+HouseDataset$NumberOfRoomsC<-NumberOfRoomsC
+AreaPopulationC<-(HouseDataset$`Area Population`-mean(HouseDataset$`Area Population`))
+HouseDataset$AreaPopulationC<-AreaPopulationC
+```
+
+
+## Section 2: The Bayesian Linear Regression Model and Posterior Convergence
+
+```{r,results = "hide"}
+##Building Bayesian model
+mean(HouseDataset$Price)
+sd(HouseDataset$Price)
+
+
+house_model<- stan_glm(Price~ AvgAreaIncomeC +HouseAgeC + NumberOfRoomsC + AreaPopulationC ,
+data = HouseDataset, family = gaussian,
+prior_intercept = normal(1233916,354567.6),
+prior = normal(c(0,0,0,0),c(2.5, 2.5, 2.5,2.5),autoscale = TRUE),
+prior_aux = exponential(1,autoscale = TRUE),
+chains = 3,
+warmup = 1000, iter = 10000, seed = 100)
+prior_summary(house_model)
+```
+
+
+```{r}
+
+mcmc_trace(house_model
+           , size = 0.1)
+```
+
+
+```{r}
+
+ESS_table<-neff_ratio(house_model)*10000
+ESS_table%>%
+  kbl(caption="Table 2.1:")%>%
+  kableExtra::kable_styling(latex_option="hold_position")
+```
+
+
+```{r}
+mcmc_dens_overlay(house_model)
+```
+
+
+```{r}
+pp_check(house_model, nreps = 50)
+
+```
+
+
+
+## Section 3: Posterior Inference
+
+
+
+  
+```{r,results='hide'}
+house_model_df<-as.data.frame(house_model )
+head(house_model_df)
+dim(house_model_df)
+(house_model_df|>filter(AvgAreaIncomeC>22)|>count())/dim(house_model_df)
+```
+  
+
+
+## Section 4: Prediction
+
+```{r,results='hide'}
+NewAgeC<-15-mean(HouseDataset$`House Age`)
+NewAgeC
+NewRoomsC<-8-mean(HouseDataset$`Number of Rooms`)
+NewRoomsC
+NewAvgIncomeC<-70000-mean(HouseDataset$`Avg. Area Income`)
+NewAvgIncomeC
+NewAreaPopulationC<-37000-mean(HouseDataset$`Area Population`)
+NewAreaPopulationC
+```
+
+
+
+```{r}
+set.seed(100)
+S <- 10000
+house_model_df <- as.data.frame(house_model)
+mystoragespace <- data.frame("ystar"= rep(NA,S)) 
+
+for (i in 1:S) {
+  num_it <- house_model_df[i,]
+  mystoragespace$ystar[i] <- rnorm(1,num_it[,1]+num_it[,2]*NewAvgIncomeC+num_it[,3]*NewAgeC+num_it[,4]*NewRoomsC+num_it[,5]*NewAreaPopulationC,num_it[,6])
+}
+
+```
+
+
+```{r}
+ggplot(as.data.frame(mystoragespace), aes(x = ystar)) + 
+  geom_density() +   labs(title = "Figure 4.1")
+```
+
+
+
+```{r}
+postcredInterval<-quantile(mystoragespace$ystar,probs = c(0.025,0.975))
+postcredInterval%>%
+  kbl(caption="Table 4.1: ")%>%
+  kableExtra::kable_styling(latex_option="hold_position")
+```
+
+
+
+
+```{r,results='hide'}
+##Building Bayesian model
+set.seed(100)
+
+
+house_model1<- stan_glm(Price~ HouseAgeC + NumberOfRoomsC + AreaPopulationC  ,
+data = HouseDataset, family = gaussian,
+prior_intercept = normal(1233916,354567.6),
+prior = normal(c(0,0,0),c( 2.5, 2.5,2.5),autoscale = TRUE),
+prior_aux = exponential(1,autoscale = TRUE),
+chains = 3,
+warmup = 1000, iter = 10000, seed = 100)
+prior_summary(house_model)
+cv_procedure1 <-bayesrules::prediction_summary_cv(
+  model = house_model1, data = HouseDataset, k = 10)
+cv_procedure1$cv
+
+cv_procedure <-bayesrules::prediction_summary_cv(
+  model = house_model, data = HouseDataset, k = 10)
+cv_procedure$cv
+
+```
